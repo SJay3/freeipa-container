@@ -29,13 +29,16 @@ jobs:
     steps:
       - id: default-matrix
         run: |
-          echo "matrix={'os': [ 'fedora-rawhide', 'fedora-40', 'fedora-39', 'centos-9-stream', 'rocky-9', 'rocky-8', 'almalinux-9' ], \
-          'docker': [ 'docker', 'podman' ], \
-          'include': [ \
-            { 'os': 'rhel-9', 'docker': 'podman' }, \
-            { 'os': 'rhel-8', 'docker': 'podman' } \
-          ] \
-          }" | tee -a $GITHUB_OUTPUT
+          (
+          echo -n "matrix={'os': [ 'fedora-rawhide', 'fedora-41', 'fedora-40', 'fedora-39', 'centos-9-stream', 'rocky-9', 'rocky-8', 'almalinux-9', 'almalinux-8' ], \
+          'docker': [ 'docker', 'podman' ] "
+          if [ -n "${{ secrets.REDHAT_ORG }}" -a -n "${{ secrets.REDHAT_ACTIVATIONKEY }}" ] ; then
+            echo -n ", 'include': [ \
+              { 'os': 'rhel-9', 'docker': 'podman' }, \
+              { 'os': 'rhel-8', 'docker': 'podman' } \
+              ]"
+          fi
+          echo "}" ) | tee -a $GITHUB_OUTPUT
         if: github.event_name != 'workflow_dispatch' || inputs.full
       - id: dispatch-matrix
         run: |
@@ -56,8 +59,6 @@ jobs:
         if: matrix.docker == 'podman' && matrix.runs-on != 'ubuntu-20.04'
       - uses: ./.github/actions/docker-cgroups-ubuntu-22
         if: matrix.docker == 'docker' && matrix.runs-on != 'ubuntu-20.04'
-      - run: sudo sysctl fs.protected_regular=0
-        if: ${{ matrix.protected_regular == 'unset' }}
       - name: For RHEL builds, use entitlements
         if: ${{ startsWith(matrix.os, 'rhel-') }}
         uses: ./.github/actions/podman-entitlement

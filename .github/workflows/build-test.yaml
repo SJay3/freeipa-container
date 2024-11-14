@@ -14,31 +14,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ fedora-rawhide, fedora-40, fedora-39, centos-9-stream, rocky-9, rocky-8, almalinux-9, almalinux-8 ]
+        os: [ fedora-rawhide, fedora-41, fedora-40, fedora-39, centos-9-stream, rocky-9, rocky-8, almalinux-9, almalinux-8 ]
         docker: [ docker ]
-        include:
-          - os: rhel-9
-            docker: podman
-          - os: rhel-8
-            docker: podman
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Install podman 4.*
-        uses: ./.github/actions/install-podman-4
-        if: matrix.docker == 'podman'
       - name: Separate git work tree with just the files needed for build
         run: git worktree add --no-checkout ../minimize-for-build
       - name: Populate with the Dockerfile
         run: cd ../minimize-for-build && git checkout HEAD Dockerfile.${{ matrix.os }}
       - name: Populate with files referenced from the Dockerfile
         run: cd ../minimize-for-build && awk '/^(ADD|COPY)/ { for (i = 2; i < NF; i++) print $i }' Dockerfile.${{ matrix.os }} | while read f ; do git checkout HEAD $f ; done
-      - name: For RHEL builds, use entitlements
-        if: ${{ startsWith(matrix.os, 'rhel-') }}
-        uses: ./.github/actions/podman-entitlement
-        with:
-          org: ${{ secrets.REDHAT_ORG }}
-          activationkey: ${{ secrets.REDHAT_ACTIVATIONKEY }}
       - name: Ensure docker images sees the named parent image
         run: awk '$1 == "FROM" { print $2 ; exit }' ../minimize-for-build/Dockerfile.${{ matrix.os }} | xargs ${{ matrix.docker }} pull
       - name: Build image
@@ -59,31 +45,20 @@ jobs:
               "body": "This issue was automatically created by GitHub Action\n\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}.\n",
               "labels": ["image-build-fail" ]
               }'
-      - name: Check resulting labels
-        run: |
-          skopeo inspect docker-daemon:localhost/freeipa-server:${{ matrix.os }} | jq '.Labels'
-          diff -u <( skopeo inspect docker://quay.io/freeipa/freeipa-server:${{ matrix.os }} | jq '.Labels' ) <( skopeo inspect docker-daemon:localhost/freeipa-server:${{ matrix.os }} | jq '.Labels' ) || true
-        if: matrix.docker != 'podman'
-      - name: Check resulting labels
-        run: |
-          skopeo inspect containers-storage:localhost/freeipa-server:${{ matrix.os }} | jq '.Labels'
-          diff -u <( skopeo inspect docker://quay.io/freeipa/freeipa-server:${{ matrix.os }} | jq '.Labels' ) <( skopeo inspect containers-storage:localhost/freeipa-server:${{ matrix.os }} | jq '.Labels' ) || true
-        if: matrix.docker == 'podman'
       - name: Create directory for artifacts
         run: mkdir freeipa-server-${{ matrix.os }}
       - name: Save image
         run: ${{ matrix.docker }} save localhost/freeipa-server:${{ matrix.os }} | gzip > freeipa-server-${{ matrix.os }}/freeipa-server-${{ matrix.os }}.tar.gz
-      - name: For RHEL builds, encrypt the artifacts
-        uses: ./.github/actions/encrypt-file
-        if: ${{ startsWith(matrix.os, 'rhel-') }}
-        with:
-          file: freeipa-server-${{ matrix.os }}/freeipa-server-${{ matrix.os }}.tar.gz
-          secret: ${{ secrets.UPLOAD_SECRET }}
       - uses: actions/upload-artifact@v4
         with:
           name: freeipa-server-${{ matrix.os }}
           path: freeipa-server-${{ matrix.os }}
           retention-days: 1
+      - name: Check resulting labels
+        run: |
+          skopeo inspect docker-archive:freeipa-server-${{ matrix.os }}/freeipa-server-${{ matrix.os }}.tar.gz | jq '.Labels'
+          diff -u <( skopeo inspect docker://quay.io/freeipa/freeipa-server:${{ matrix.os }} | jq '.Labels' ) <( skopeo inspect docker-archive:freeipa-server-${{ matrix.os }}/freeipa-server-${{ matrix.os }}.tar.gz | jq '.Labels' ) || true
+        shell: bash
 
   test-docker:
     name: Run with docker
@@ -93,20 +68,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: fedora-40
-          - os: fedora-40
+          - os: fedora-41
+          - os: fedora-41
             readonly: --read-only
-          - os: fedora-40
+            volume: freeipa-data
+          - os: fedora-41
             readonly: --read-only
-            ca: --external-ca
           - os: fedora-rawhide
+          - os: fedora-rawhide
+            readonly: --read-only
+            ca: --external-ca
+            volume: freeipa-data
           - os: centos-9-stream
           - os: centos-9-stream
             readonly: --read-only
+            volume: freeipa-data
           - os: centos-9-stream
             readonly: --read-only
             ca: --external-ca
-        os: [ fedora-39, rhel-9, rhel-8, almalinux-9 ]
+        os: [ fedora-40, fedora-39, almalinux-9, rocky-8 ]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -114,16 +94,12 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: freeipa-server-${{ matrix.os }}
-      - name: Decrypt artifacts that were encrypted after build
-        uses: ./.github/actions/decrypt-file
-        if: ${{ startsWith(matrix.os, 'rhel-') }}
-        with:
-          file: freeipa-server-${{ matrix.os }}.tar.gz
-          secret: ${{ secrets.UPLOAD_SECRET }}
       - name: Load image
         run: gunzip < freeipa-server-${{ matrix.os }}.tar.gz | docker load
+      - run: docker volume create ${{ matrix.volume }}
+        if: ${{ matrix.volume }} == freeipa-data
       - name: Run master and replica
-        run: readonly=${{ matrix.readonly }} ca=${{ matrix.ca }} seccomp=${{ matrix.seccomp }} replica=${{ matrix.replica }} tests/run-master-and-replica.sh localhost/freeipa-server:${{ matrix.os }}
+        run: readonly=${{ matrix.readonly }} ca=${{ matrix.ca }} VOLUME=${{ matrix.volume }} seccomp=${{ matrix.seccomp }} replica=${{ matrix.replica }} tests/run-master-and-replica.sh localhost/freeipa-server:${{ matrix.os }}
       - name: Run partial tests
         if: ${{ failure() }}
         run: tests/run-partial-tests.sh Dockerfile.${{ matrix.os }}
@@ -135,8 +111,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ fedora-rawhide, fedora-40, rocky-9, almalinux-9 ]
-        readonly: [ --read-only ]
+        include:
+          - os: fedora-rawhide
+            readonly: --read-only
+          - os: fedora-41
+            readonly: --read-only
+            volume: freeipa-data
+          - os: rocky-9
+            readonly: --read-only
+          - os: almalinux-8
+            readonly: --read-only
+            volume: freeipa-data
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -145,16 +130,12 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: freeipa-server-${{ matrix.os }}
-      - name: Decrypt artifacts that were encrypted after build
-        uses: ./.github/actions/decrypt-file
-        if: ${{ startsWith(matrix.os, 'rhel-') }}
-        with:
-          file: freeipa-server-${{ matrix.os }}.tar.gz
-          secret: ${{ secrets.UPLOAD_SECRET }}
       - name: Load image
         run: gunzip < freeipa-server-${{ matrix.os }}.tar.gz | docker load
+      - run: docker volume create ${{ matrix.volume }}
+        if: ${{ matrix.volume }} == freeipa-data
       - name: Run master and replica
-        run: readonly=${{ matrix.readonly }} ca=${{ matrix.ca }} seccomp=${{ matrix.seccomp }} replica=${{ matrix.replica }} tests/run-master-and-replica.sh localhost/freeipa-server:${{ matrix.os }}
+        run: readonly=${{ matrix.readonly }} ca=${{ matrix.ca }} VOLUME=${{ matrix.volume }} seccomp=${{ matrix.seccomp }} replica=${{ matrix.replica }} tests/run-master-and-replica.sh localhost/freeipa-server:${{ matrix.os }}
       - name: Run partial tests
         if: ${{ failure() }}
         run: tests/run-partial-tests.sh Dockerfile.${{ matrix.os }}
@@ -167,7 +148,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: fedora-40
+          - os: fedora-41
             readonly: --read-only
           - os: centos-9-stream
             readonly: --read-only
@@ -178,17 +159,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: freeipa-server-${{ matrix.os }}
-      - name: Decrypt artifacts that were encrypted after build
-        uses: ./.github/actions/decrypt-file
-        if: ${{ startsWith(matrix.os, 'rhel-') }}
-        with:
-          file: freeipa-server-${{ matrix.os }}.tar.gz
-          secret: ${{ secrets.UPLOAD_SECRET }}
       - name: Load image
         run: gunzip < freeipa-server-${{ matrix.os }}.tar.gz | docker load
-      - name: Disable fs.protected_regular
-        if: ${{ matrix.protected_regular == 'unset' }}
-        run: sudo sysctl fs.protected_regular=0
       - name: Run master and replica
         run: readonly=${{ matrix.readonly }} ca=${{ matrix.ca }} seccomp=${{ matrix.seccomp }} replica=${{ matrix.replica }} tests/run-master-and-replica.sh localhost/freeipa-server:${{ matrix.os }}
       - name: Run partial tests
@@ -202,7 +174,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ fedora-40, centos-9-stream ]
+        os: [ fedora-41, centos-9-stream ]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -211,12 +183,6 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: freeipa-server-${{ matrix.os }}
-      - name: Decrypt artifacts that were encrypted after build
-        uses: ./.github/actions/decrypt-file
-        if: ${{ startsWith(matrix.os, 'rhel-') }}
-        with:
-          file: freeipa-server-${{ matrix.os }}.tar.gz
-          secret: ${{ secrets.UPLOAD_SECRET }}
       - name: Load image
         run: gunzip < freeipa-server-${{ matrix.os }}.tar.gz | sudo podman load
       - name: Run master and replica
@@ -232,7 +198,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ fedora-40, rhel-9, rhel-8, centos-9-stream, rocky-9, rocky-8 ]
+        include:
+          - os: fedora-41
+            readonly: --read-only
+            volume: freeipa-data
+          - os: almalinux-9
+            readonly: --read-only
+            volume: freeipa-data
+          - os: rocky-8
+            readonly: --read-only
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -241,16 +215,12 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: freeipa-server-${{ matrix.os }}
-      - name: Decrypt artifacts that were encrypted after build
-        uses: ./.github/actions/decrypt-file
-        if: ${{ startsWith(matrix.os, 'rhel-') }}
-        with:
-          file: freeipa-server-${{ matrix.os }}.tar.gz
-          secret: ${{ secrets.UPLOAD_SECRET }}
       - name: Load image
         run: gunzip < freeipa-server-${{ matrix.os }}.tar.gz | podman load
-      - name: Run master
-        run: docker=podman tests/run-master-and-replica.sh localhost/freeipa-server:${{ matrix.os }} && podman pod ls -q | xargs podman pod rm -f
+      - run: podman volume create ${{ matrix.volume }}
+        if: ${{ matrix.volume }} == freeipa-data
+      - name: Run master and replica
+        run: docker=podman VOLUME=${{ matrix.volume }} tests/run-master-and-replica.sh localhost/freeipa-server:${{ matrix.os }} && podman pod ls -q | xargs podman pod rm -f
       - name: Run partial tests
         if: ${{ failure() }}
         run: docker=podman tests/run-partial-tests.sh Dockerfile.${{ matrix.os }}
@@ -263,16 +233,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - os: fedora-rawhide
+            data-from: fedora-41
+          - os: fedora-41
+            data-from: fedora-41
+          - os: fedora-41
+            data-from: fedora-40
           - os: fedora-40
             data-from: fedora-39
-          - os: fedora-40
-            data-from: fedora-38
-          - os: rhel-8
-            data-from: centos-8
           - os: rocky-8
-            data-from: centos-8
-          - os: almalinux-8
-            data-from: centos-8
+            data-from: centos-8-certs-updated-data
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -280,12 +250,6 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: freeipa-server-${{ matrix.os }}
-      - name: Decrypt artifacts that were encrypted after build
-        uses: ./.github/actions/decrypt-file
-        if: ${{ startsWith(matrix.os, 'rhel-') }}
-        with:
-          file: freeipa-server-${{ matrix.os }}.tar.gz
-          secret: ${{ secrets.UPLOAD_SECRET }}
       - name: Load image
         run: gunzip < freeipa-server-${{ matrix.os }}.tar.gz | docker load
       - name: Populate volume with data
@@ -301,8 +265,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: fedora-40
-            data-from: fedora-39
+          - os: fedora-41
+            data-from: fedora-40
+          - os: almalinux-8
+            data-from: centos-8-certs-updated-data
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -311,12 +277,6 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: freeipa-server-${{ matrix.os }}
-      - name: Decrypt artifacts that were encrypted after build
-        uses: ./.github/actions/decrypt-file
-        if: ${{ startsWith(matrix.os, 'rhel-') }}
-        with:
-          file: freeipa-server-${{ matrix.os }}.tar.gz
-          secret: ${{ secrets.UPLOAD_SECRET }}
       - name: Load image
         run: gunzip < freeipa-server-${{ matrix.os }}.tar.gz | podman load
       - name: Populate volume with data
@@ -334,20 +294,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: fedora-40
-            data-from: fedora-39
+          - os: fedora-41
+            data-from: fedora-41
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: freeipa-server-${{ matrix.os }}
-      - name: Decrypt artifacts that were encrypted after build
-        uses: ./.github/actions/decrypt-file
-        if: ${{ startsWith(matrix.os, 'rhel-') }}
-        with:
-          file: freeipa-server-${{ matrix.os }}.tar.gz
-          secret: ${{ secrets.UPLOAD_SECRET }}
       - name: Load image
         run: gunzip < freeipa-server-${{ matrix.os }}.tar.gz | docker load
       - name: Populate volume with data
@@ -362,7 +316,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ fedora-rawhide, fedora-40, rhel-9, rhel-8, centos-9-stream ]
+        os: [ fedora-41, rocky-9, almalinux-8, centos-9-stream ]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -370,12 +324,6 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: freeipa-server-${{ matrix.os }}
-      - name: Decrypt artifacts that were encrypted after build
-        uses: ./.github/actions/decrypt-file
-        if: ${{ startsWith(matrix.os, 'rhel-') }}
-        with:
-          file: freeipa-server-${{ matrix.os }}.tar.gz
-          secret: ${{ secrets.UPLOAD_SECRET }}
       - name: Download latest cri-dockerd
         run: curl -s ${{ github.api_url }}/repos/Mirantis/cri-dockerd/releases/latest | jq -r '.assets[].browser_download_url' | grep jammy_amd64.deb | tee /dev/stderr | xargs curl -LO
       - name: Install cri-dockerd
@@ -399,7 +347,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ fedora-rawhide, fedora-40, fedora-39, centos-9-stream, rocky-9, rocky-8, almalinux-9 ]
+        os: [ fedora-41, fedora-40, fedora-39, centos-9-stream, rocky-9, rocky-8, almalinux-9, almalinux-8 ]
     timeout-minutes: 30
     steps:
       - uses: actions/download-artifact@v4
@@ -432,4 +380,42 @@ jobs:
           done << 'EOF'
           ${{ secrets.REGISTRY_TARGET_LIST }}
           EOF
+
+  test-subscription:
+    # Workaround https://github.com/actions/runner/issues/1138
+    name: Prerequisite for RHEL builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      has_rhel_subscriptions: ${{ steps.check.outputs.has_rhel_subscriptions }}
+    steps:
+      - id: check
+        run: |
+          if [ -n "${{ secrets.REDHAT_ORG }}" -a -n "${{ secrets.REDHAT_ACTIVATIONKEY }}" ] ; then
+            echo "has_rhel_subscriptions=1" >> $GITHUB_OUTPUT
+          fi
+
+  build-test-rhel-podman:
+    name: Build and test RHEL image
+    runs-on: ubuntu-22.04
+    needs: [ test-subscription ]
+    if: needs.test-subscription.outputs.has_rhel_subscriptions == 1
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ rhel-9, rhel-8 ]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install podman 4.*
+        uses: ./.github/actions/install-podman-4
+      - name: For RHEL builds, use entitlements
+        uses: ./.github/actions/podman-entitlement
+        with:
+          org: ${{ secrets.REDHAT_ORG }}
+          activationkey: ${{ secrets.REDHAT_ACTIVATIONKEY }}
+      - name: Build image
+        run: podman build -t localhost/freeipa-server:${{ matrix.os }} -f Dockerfile.${{ matrix.os }} .
+      - name: Run master
+        run: docker=podman tests/run-master-and-replica.sh localhost/freeipa-server:${{ matrix.os }} && podman pod ls -q | xargs podman pod rm -f
 
