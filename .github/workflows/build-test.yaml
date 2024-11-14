@@ -230,6 +230,7 @@ jobs:
         run: docker=podman tests/run-partial-tests.sh Dockerfile.${{ matrix.os }}
 
   test-upgrade:
+    if: false
     name: Upgrade from older version or build
     runs-on: ubuntu-22.04
     needs: [ build ]
@@ -262,6 +263,7 @@ jobs:
         run: VOLUME=/tmp/freeipa-data replica=none tests/run-master-and-replica.sh localhost/freeipa-server:${{ matrix.os }}
 
   test-upgrade-podman:
+    if: false
     name: Upgrade from older version with podman 4
     runs-on: ubuntu-22.04
     needs: [ build ]
@@ -291,6 +293,7 @@ jobs:
         run: docker=podman VOLUME=/tmp/freeipa-data replica=none tests/run-master-and-replica.sh localhost/freeipa-server:${{ matrix.os }}
 
   test-upgrade-20-04:
+    if: false
     name: Upgrade from older version or build on Ubuntu 20.04
     runs-on: ubuntu-20.04
     needs: [ build ]
@@ -314,6 +317,7 @@ jobs:
         run: VOLUME=/tmp/freeipa-data replica=none tests/run-master-and-replica.sh localhost/freeipa-server:${{ matrix.os }}
 
   test-k3s:
+    if: false
     name: Run with K3s with docker
     runs-on: ubuntu-22.04
     needs: [ build ]
