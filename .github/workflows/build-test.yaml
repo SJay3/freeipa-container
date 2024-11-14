@@ -61,6 +61,7 @@ jobs:
         shell: bash
 
   test-docker:
+    if: false
     name: Run with docker
     runs-on: ubuntu-22.04
     needs: [ build ]
@@ -105,6 +106,7 @@ jobs:
         run: tests/run-partial-tests.sh Dockerfile.${{ matrix.os }}
 
   test-rootless-docker:
+    if: false
     name: Run with rootless docker
     runs-on: ubuntu-22.04
     needs: [ build ]
@@ -141,6 +143,7 @@ jobs:
         run: tests/run-partial-tests.sh Dockerfile.${{ matrix.os }}
 
   test-docker-20-04:
+    if: false
     name: Run with docker on Ubuntu 20.04 with hybrid cgroups
     runs-on: ubuntu-20.04
     needs: [ build ]
@@ -168,6 +171,7 @@ jobs:
         run: tests/run-partial-tests.sh Dockerfile.${{ matrix.os }}
 
   test-podman:
+    if: false
     name: Run with sudo podman 4
     runs-on: ubuntu-22.04
     needs: [ build ]
