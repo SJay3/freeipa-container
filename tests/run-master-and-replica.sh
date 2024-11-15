@@ -81,7 +81,6 @@ function wait_for_ipa_container() {
 		ls -la /var/log/journal/$MACHINE_ID
 		exit 1
 	fi
-	$docker exec "$N" cat /run/ipa/ipa-server-install-options
 }
 
 function run_ipa_container() {

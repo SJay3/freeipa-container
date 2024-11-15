@@ -117,6 +117,7 @@ chmod 600 $OPTIONS_FILE
 for i in "$@" ; do
 	printf '%q\n' "$i" >> $OPTIONS_FILE
 done
+cat $docker exec "$N" cat /run/ipa/ipa-server-install-options
 
 _HOSTNAME_IN_NEXT=false
 for i in $( cat $OPTIONS_FILE ) ; do
