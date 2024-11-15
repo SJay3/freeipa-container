@@ -81,6 +81,7 @@ function wait_for_ipa_container() {
 		ls -la /var/log/journal/$MACHINE_ID
 		exit 1
 	fi
+	$docker exec "$N" cat /run/ipa/ipa-server-install-options
 }
 
 function run_ipa_container() {
@@ -140,6 +141,7 @@ function run_ipa_container() {
 		-e DEBUG_TRACE=1 \
 		-e PASSWORD=Secret123 "$IMAGE" "$@"
 	)
+	$docker inspect freeipa-master
 	wait_for_ipa_container "$N" "$@"
 }
 
