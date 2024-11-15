@@ -55,8 +55,9 @@ function wait_for_ipa_container() {
 				echo "The container systemctl is-system-running [$STATUS]."
 				$docker exec "$N" systemctl
 				$docker exec "$N" systemctl status
-				cat $VOLUME/var/log/ipa-server-run.log
-				cat $VOLUME/var/log/ipa-server-configure-first.log
+
+				$docker exec "$N" cat /data/var/log/ipa-server-run.log
+				$docker exec "$N" cat /data/var/log/ipa-server-configure-first.log
 				# cat $VOLUME/var/log/ipaserver-install.log
 				EXIT_STATUS=1
 				break
