@@ -265,6 +265,7 @@ fi
 
 # Setup replica
 readonly_run="$readonly"
+$docker inspect freeipa-master
 MASTER_IP=$( $docker inspect --format '{{ .NetworkSettings.IPAddress }}' freeipa-master )
 DOCKER_RUN_OPTS="--dns=$MASTER_IP"
 if [ "$docker" != "sudo podman" -a "$docker" != "podman" ] ; then
