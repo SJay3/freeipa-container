@@ -106,7 +106,6 @@ jobs:
         run: tests/run-partial-tests.sh Dockerfile.${{ matrix.os }}
 
   test-rootless-docker:
-    if: false
     name: Run with rootless docker
     runs-on: ubuntu-22.04
     needs: [ build ]
